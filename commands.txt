@@ -1,0 +1,6 @@
+Subir projeto
+docker compose down -v && docker compose up -d
+./scripts/setup.sh
+
+Executar consumer
+docker compose exec -it php-app php consumer.php --verbose

@@ -1,0 +1,30 @@
+{
+  "name": "cnes-mysql-source",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "mysql",
+    "database.port": "3306",
+    "database.user": "appuser",
+    "database.password": "appuser123",
+    "database.server.id": "184054",
+    "database.allowPublicKeyRetrieval": "true",
+    "database.include.list": "cnes_db",
+    "table.include.list": "cnes_db.estabelecimentos,cnes_db.profissionais,cnes_db.carga_horaria,cnes_db.equipes,cnes_db.equipe_profissionais,cnes_db.estab_equipamentos,cnes_db.estab_servicos",
+    "topic.prefix": "cdc",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:29092",
+    "schema.history.internal.kafka.topic": "schema-history.cnes",
+    "include.schema.changes": "false",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": false,
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": false,
+    "tombstones.on.delete": "false",
+    "transforms": "addTimestamp",
+    "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+    "transforms.addTimestamp.timestamp.field": "ts_kafka_connect",
+    "decimal.handling.mode": "string",
+    "time.precision.mode": "connect",
+    "database.connectionProperties": "useUnicode=true;characterEncoding=UTF-8"
+  }
+}

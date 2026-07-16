@@ -1,0 +1,10 @@
+.idea/
+vendor/
+node_modules/
+lakehouse-data/bronze/
+lakehouse-data/silver/
+lakehouse-data/gold/
+app/logs/
+*.log
+.env
+base_de_dados_cnes_202602

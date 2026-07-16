@@ -1,0 +1,759 @@
+-- ============================================================
+-- Schema: cnes_db
+-- Cadastro Nacional de Estabelecimentos de Saude
+-- Pipeline CDC -> Kafka -> Streaming ETL -> Data Lakehouse
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS cnes_db;
+USE cnes_db;
+
+-- ============================================================
+-- TABELAS TRANSACIONAIS (monitoradas pelo Debezium CDC)
+-- ============================================================
+
+-- 1. Estabelecimentos de saude
+CREATE TABLE estabelecimentos (
+    co_unidade VARCHAR(20) PRIMARY KEY,
+    co_cnes VARCHAR(7) NOT NULL,
+    nu_cnpj_mantenedora VARCHAR(14),
+    no_razao_social VARCHAR(200),
+    no_fantasia VARCHAR(200),
+    no_logradouro VARCHAR(200),
+    nu_endereco VARCHAR(10),
+    no_bairro VARCHAR(100),
+    co_cep VARCHAR(8),
+    nu_telefone VARCHAR(20),
+    no_email VARCHAR(100),
+    co_atividade VARCHAR(5),
+    co_turno_atendimento VARCHAR(5),
+    co_estado_gestor VARCHAR(2),
+    co_municipio_gestor VARCHAR(6),
+    dt_atualizacao DATE,
+    nu_latitude DECIMAL(12,8),
+    nu_longitude DECIMAL(12,8),
+    co_natureza_jur VARCHAR(10),
+    st_conexao_internet VARCHAR(2),
+    co_tipo_unidade VARCHAR(5),
+    tp_gestao VARCHAR(5),
+    co_tipo_estabelecimento VARCHAR(5),
+    co_atividade_principal VARCHAR(5),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_cnes (co_cnes),
+    INDEX idx_municipio (co_municipio_gestor),
+    INDEX idx_tipo_estab (co_tipo_estabelecimento)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 2. Profissionais SUS
+CREATE TABLE profissionais (
+    co_profissional_sus VARCHAR(20) PRIMARY KEY,
+    co_cpf VARCHAR(20),
+    no_profissional VARCHAR(200) NOT NULL,
+    co_cns VARCHAR(20),
+    dt_atualizacao DATE,
+    co_nacionalidade VARCHAR(5),
+    no_social VARCHAR(200),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_cns (co_cns)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 3. Carga horaria (vinculo profissional-estabelecimento)
+CREATE TABLE carga_horaria (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    co_unidade VARCHAR(20) NOT NULL,
+    co_profissional_sus VARCHAR(20) NOT NULL,
+    co_cbo VARCHAR(10) NOT NULL,
+    tp_sus_nao_sus VARCHAR(2),
+    ind_vinculacao VARCHAR(10),
+    qt_carga_horaria_ambulatorial INT DEFAULT 0,
+    co_conselho_classe VARCHAR(5),
+    nu_registro VARCHAR(20),
+    qt_carga_horaria_outros INT DEFAULT 0,
+    qt_carga_hor_hosp_sus INT DEFAULT 0,
+    dt_atualizacao DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_vinculo (co_unidade, co_profissional_sus, co_cbo),
+    INDEX idx_unidade (co_unidade),
+    INDEX idx_profissional (co_profissional_sus),
+    INDEX idx_cbo (co_cbo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. Equipes de saude (ESF, NASF, etc.)
+CREATE TABLE equipes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    co_municipio VARCHAR(6) NOT NULL,
+    co_area VARCHAR(10),
+    seq_equipe VARCHAR(20) NOT NULL,
+    co_unidade VARCHAR(20),
+    tp_equipe VARCHAR(5),
+    no_referencia VARCHAR(200),
+    dt_ativacao DATE,
+    dt_desativacao DATE,
+    tp_pop_assist_quilomb VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_assent VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_geral VARCHAR(2) DEFAULT '1',
+    tp_pop_assist_escola VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_indigena VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_ribeirinha VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_situacao_rua VARCHAR(2) DEFAULT '2',
+    tp_pop_assist_priv_liberdade VARCHAR(2) DEFAULT '2',
+    co_equipe VARCHAR(20),
+    dt_atualizacao DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_equipe (co_municipio, co_area, seq_equipe),
+    INDEX idx_unidade (co_unidade),
+    INDEX idx_tipo (tp_equipe),
+    INDEX idx_municipio (co_municipio)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 5. Composicao das equipes (profissionais vinculados)
+CREATE TABLE equipe_profissionais (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    co_municipio VARCHAR(6) NOT NULL,
+    co_area VARCHAR(10),
+    seq_equipe VARCHAR(20) NOT NULL,
+    co_profissional_sus VARCHAR(20) NOT NULL,
+    co_unidade VARCHAR(20),
+    co_cbo VARCHAR(10),
+    tp_sus_nao_sus VARCHAR(2) DEFAULT 'S',
+    ind_vinculacao VARCHAR(10),
+    dt_entrada DATE,
+    dt_desligamento DATE,
+    st_equipeminima VARCHAR(2),
+    dt_atualizacao DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_equipe_prof (co_municipio, co_area, seq_equipe, co_profissional_sus),
+    INDEX idx_profissional (co_profissional_sus),
+    INDEX idx_unidade (co_unidade)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 6. Equipamentos por estabelecimento
+CREATE TABLE estab_equipamentos (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    co_unidade VARCHAR(20) NOT NULL,
+    co_equipamento VARCHAR(5) NOT NULL,
+    co_tipo_equipamento VARCHAR(5) NOT NULL,
+    qt_existente INT DEFAULT 0,
+    qt_uso INT DEFAULT 0,
+    tp_sus VARCHAR(2),
+    qt_sus INT DEFAULT 0,
+    dt_atualizacao DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_estab_equip (co_unidade, co_equipamento, co_tipo_equipamento),
+    INDEX idx_unidade (co_unidade)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 7. Servicos por estabelecimento
+CREATE TABLE estab_servicos (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    co_unidade VARCHAR(20) NOT NULL,
+    co_servico VARCHAR(5) NOT NULL,
+    co_classificacao VARCHAR(5) NOT NULL,
+    co_ambulatorial VARCHAR(2) DEFAULT '2',
+    co_ambulatorial_sus VARCHAR(2) DEFAULT '2',
+    co_hospitalar VARCHAR(2) DEFAULT '2',
+    co_hospitalar_sus VARCHAR(2) DEFAULT '2',
+    dt_atualizacao DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_estab_serv (co_unidade, co_servico, co_classificacao),
+    INDEX idx_unidade (co_unidade),
+    INDEX idx_servico (co_servico)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================
+-- TABELAS DIMENSIONAIS (lookup / referencia)
+-- ============================================================
+
+-- Estados (27 UFs brasileiras)
+CREATE TABLE estados (
+    co_uf VARCHAR(2) PRIMARY KEY,
+    co_sigla VARCHAR(2) NOT NULL,
+    no_descricao VARCHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO estados (co_uf, co_sigla, no_descricao) VALUES
+('11','RO','RONDONIA'),
+('12','AC','ACRE'),
+('13','AM','AMAZONAS'),
+('14','RR','RORAIMA'),
+('15','PA','PARA'),
+('16','AP','AMAPA'),
+('17','TO','TOCANTINS'),
+('21','MA','MARANHAO'),
+('22','PI','PIAUI'),
+('23','CE','CEARA'),
+('24','RN','RIO GRANDE DO NORTE'),
+('25','PB','PARAIBA'),
+('26','PE','PERNAMBUCO'),
+('27','AL','ALAGOAS'),
+('28','SE','SERGIPE'),
+('29','BA','BAHIA'),
+('31','MG','MINAS GERAIS'),
+('32','ES','ESPIRITO SANTO'),
+('33','RJ','RIO DE JANEIRO'),
+('35','SP','SAO PAULO'),
+('41','PR','PARANA'),
+('42','SC','SANTA CATARINA'),
+('43','RS','RIO GRANDE DO SUL'),
+('50','MS','MATO GROSSO DO SUL'),
+('51','MT','MATO GROSSO'),
+('52','GO','GOIAS'),
+('53','DF','DISTRITO FEDERAL');
+
+-- Municipios (30 representativos)
+CREATE TABLE municipios (
+    co_municipio VARCHAR(6) PRIMARY KEY,
+    no_municipio VARCHAR(100) NOT NULL,
+    co_sigla_estado VARCHAR(2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO municipios (co_municipio, no_municipio, co_sigla_estado) VALUES
+('355030','SAO PAULO','SP'),
+('330455','RIO DE JANEIRO','RJ'),
+('310620','BELO HORIZONTE','MG'),
+('410690','CURITIBA','PR'),
+('431490','PORTO ALEGRE','RS'),
+('292740','SALVADOR','BA'),
+('261160','RECIFE','PE'),
+('230440','FORTALEZA','CE'),
+('530010','BRASILIA','DF'),
+('316990','JUIZ DE FORA','MG'),
+('150140','BELEM','PA'),
+('520870','GOIANIA','GO'),
+('211130','SAO LUIS','MA'),
+('280030','ARACAJU','SE'),
+('240810','NATAL','RN'),
+('250750','JOAO PESSOA','PB'),
+('270430','MACEIO','AL'),
+('172100','PALMAS','TO'),
+('160030','MACAPA','AP'),
+('110020','PORTO VELHO','RO'),
+('140010','BOA VISTA','RR'),
+('130260','MANAUS','AM'),
+('500270','CAMPO GRANDE','MS'),
+('510340','CUIABA','MT'),
+('120040','RIO BRANCO','AC'),
+('221100','TERESINA','PI'),
+('420540','FLORIANOPOLIS','SC'),
+('320530','VITORIA','ES'),
+('316960','JUATUBA','MG'),
+('310560','BARBACENA','MG');
+
+-- Tipo de estabelecimento (20 tipos)
+CREATE TABLE tipo_estabelecimento (
+    co_tipo_estabelecimento VARCHAR(5) PRIMARY KEY,
+    ds_tipo_estabelecimento VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO tipo_estabelecimento (co_tipo_estabelecimento, ds_tipo_estabelecimento) VALUES
+('001','UNIDADE BASICA DE SAUDE'),
+('002','CENTRO DE SAUDE/UNIDADE BASICA'),
+('004','POLICLINICA'),
+('005','HOSPITAL GERAL'),
+('007','HOSPITAL ESPECIALIZADO'),
+('009','PRONTO SOCORRO GERAL'),
+('015','UNIDADE MISTA'),
+('020','PRONTO SOCORRO ESPECIALIZADO'),
+('021','LABORATORIO CENTRAL DE SAUDE PUBLICA - LACEN'),
+('022','CENTRAL DE REGULACAO DE SERVICOS DE SAUDE'),
+('036','CLINICA/CENTRO DE ESPECIALIDADE'),
+('039','UNIDADE DE APOIO DIAGNOSE E TERAPIA'),
+('040','UNIDADE MOVEL TERRESTRE'),
+('042','UNIDADE MOVEL DE NIVEL PRE-HOSPITALAR'),
+('043','FARMACIA'),
+('050','UNIDADE DE VIGILANCIA EM SAUDE'),
+('060','COOPERATIVA'),
+('061','CENTRO DE PARTO NORMAL'),
+('062','HOSPITAL/DIA'),
+('064','CENTRAL DE REGULACAO MEDICA DE URGENCIAS');
+
+-- Tipo de unidade (15 tipos)
+CREATE TABLE tipo_unidade (
+    co_tipo_unidade VARCHAR(5) PRIMARY KEY,
+    ds_tipo_unidade VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO tipo_unidade (co_tipo_unidade, ds_tipo_unidade) VALUES
+('01','POSTO DE SAUDE'),
+('02','CENTRO DE SAUDE/UNIDADE BASICA'),
+('04','POLICLINICA'),
+('05','HOSPITAL GERAL'),
+('07','HOSPITAL ESPECIALIZADO'),
+('15','UNIDADE MISTA'),
+('20','PRONTO SOCORRO'),
+('21','LABORATORIO'),
+('36','CLINICA/CENTRO DE ESPECIALIDADE'),
+('39','UNIDADE DE APOIO DIAGNOSE E TERAPIA'),
+('40','UNIDADE MOVEL TERRESTRE'),
+('42','UNIDADE MOVEL PRE-HOSPITALAR'),
+('43','FARMACIA'),
+('50','UNIDADE DE VIGILANCIA EM SAUDE'),
+('62','HOSPITAL DIA');
+
+-- Natureza juridica (15 tipos)
+CREATE TABLE natureza_juridica (
+    co_natureza_jur VARCHAR(10) PRIMARY KEY,
+    ds_natureza_jur VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO natureza_juridica (co_natureza_jur, ds_natureza_jur) VALUES
+('1000','ADMINISTRACAO PUBLICA'),
+('1015','ORGAO PUBLICO DO PODER EXECUTIVO FEDERAL'),
+('1023','ORGAO PUBLICO DO PODER EXECUTIVO ESTADUAL'),
+('1031','ORGAO PUBLICO DO PODER EXECUTIVO MUNICIPAL'),
+('1244','MUNICIPIO'),
+('1252','FUNDACAO PUBLICA DE DIREITO PRIVADO FEDERAL'),
+('2011','EMPRESA PUBLICA'),
+('2038','SOCIEDADE DE ECONOMIA MISTA'),
+('2062','SOCIEDADE EMPRESARIA LIMITADA'),
+('3069','FUNDACAO PRIVADA'),
+('3999','ASSOCIACAO PRIVADA'),
+('2054','SOCIEDADE ANONIMA ABERTA'),
+('1236','ESTADO OU DISTRITO FEDERAL'),
+('3220','ORGANIZACAO RELIGIOSA'),
+('1260','FUNDACAO PUBLICA DE DIREITO PRIVADO ESTADUAL');
+
+-- Gestao (7 tipos)
+CREATE TABLE gestao (
+    co_gestao VARCHAR(5) PRIMARY KEY,
+    ds_gestao VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO gestao (co_gestao, ds_gestao) VALUES
+('00','NAO SE APLICA'),
+('01','ATENCAO BASICA'),
+('02','MEDIA COMPLEXIDADE'),
+('03','ALTA COMPLEXIDADE'),
+('04','ATENCAO BASICA E MEDIA COMPLEXIDADE'),
+('05','MEDIA E ALTA COMPLEXIDADE'),
+('06','ATENCAO BASICA MEDIA E ALTA COMPLEXIDADE');
+
+-- Turno de atendimento (7 tipos)
+CREATE TABLE turno_atendimento (
+    co_turno_atendimento VARCHAR(5) PRIMARY KEY,
+    ds_turno_atendimento VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO turno_atendimento (co_turno_atendimento, ds_turno_atendimento) VALUES
+('01','ATENDIMENTO SOMENTE PELA MANHA'),
+('02','ATENDIMENTO SOMENTE A TARDE'),
+('03','ATENDIMENTOS NOS TURNOS DA MANHA E A TARDE'),
+('04','ATENDIMENTO CONTINUO DE 24 HORAS/DIA'),
+('05','ATENDIMENTO NOTURNO'),
+('06','ATENDIMENTO MANHA TARDE E NOITE'),
+('07','NAO SE APLICA');
+
+-- Convenios (7 tipos)
+CREATE TABLE convenios (
+    co_convenio VARCHAR(5) PRIMARY KEY,
+    ds_convenio VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO convenios (co_convenio, ds_convenio) VALUES
+('01','SUS'),
+('02','PARTICULAR'),
+('03','PLANO / SEGURO PROPRIO'),
+('04','PLANO / SEGURO TERCEIRO'),
+('05','PLANO DE SAUDE PUBLICO'),
+('06','PLANO DE SAUDE PRIVADO'),
+('07','GRATUIDADE');
+
+-- Modalidade de vinculo (10 tipos)
+CREATE TABLE mod_vinculo (
+    cd_vinculacao VARCHAR(5) PRIMARY KEY,
+    ds_vinculacao VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO mod_vinculo (cd_vinculacao, ds_vinculacao) VALUES
+('01','VINCULO EMPREGATICIO'),
+('02','AUTONOMO'),
+('03','COOPERATIVA'),
+('04','OUTROS'),
+('05','RESIDENCIA'),
+('06','ESTAGIO'),
+('07','BOLSA'),
+('08','INTERMEDIADO'),
+('09','INFORMAL'),
+('10','SERVIDOR PUBLICO CEDIDO PARA INICIATIVA PRIVADA');
+
+-- Tipo de equipamento (10 tipos)
+CREATE TABLE tipo_equipamento (
+    co_tipo_equipamento VARCHAR(5) PRIMARY KEY,
+    ds_tipo_equipamento VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO tipo_equipamento (co_tipo_equipamento, ds_tipo_equipamento) VALUES
+('1','EQUIPAMENTOS DE DIAGNOSTICO POR IMAGEM'),
+('2','EQUIPAMENTOS DE INFRA-ESTRUTURA'),
+('3','EQUIPAMENTOS POR METODOS OPTICOS'),
+('4','EQUIPAMENTOS POR METODOS GRAFICOS'),
+('5','EQUIPAMENTOS PARA MANUTENCAO DA VIDA'),
+('6','EQUIPAMENTOS DE ODONTOLOGIA'),
+('7','EQUIPAMENTOS PARA TERAPIA'),
+('8','EQUIPAMENTOS AUDIOMETRICOS'),
+('9','EQUIPAMENTOS PARA REABILITACAO'),
+('10','DIALISE');
+
+-- Catalogo de equipamentos (20 equipamentos)
+CREATE TABLE equipamentos_catalogo (
+    co_equipamento VARCHAR(5) PRIMARY KEY,
+    co_tipo_equipamento VARCHAR(5),
+    ds_equipamento VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO equipamentos_catalogo (co_equipamento, co_tipo_equipamento, ds_equipamento) VALUES
+('01','1','RAIO X ATE 100MA'),
+('02','1','RAIO X DE 100 A 500MA'),
+('03','1','RAIO X MAIS DE 500MA'),
+('04','1','MAMOGRAFO'),
+('05','1','TOMOGRAFO COMPUTADORIZADO'),
+('06','1','RESSONANCIA MAGNETICA'),
+('07','1','ULTRASSOM DOPPLER COLORIDO'),
+('08','2','GRUPO GERADOR ACIMA DE 2.5 KVA'),
+('09','2','BOMBA DE INFUSAO'),
+('10','3','ENDOSCOPIO DIGESTIVO'),
+('11','3','COLPOSCOPIO'),
+('12','4','ELETROCARDIOGRAFO'),
+('13','4','ELETROENCEFALOGRAFO'),
+('14','5','DESFIBRILADOR'),
+('15','5','MONITOR DE ECG'),
+('16','5','RESPIRADOR/VENTILADOR PULMONAR'),
+('17','6','EQUIPO ODONTOLOGICO'),
+('18','6','COMPRESSOR ODONTOLOGICO'),
+('19','7','EQUIPAMENTO DE FOTOTERAPIA'),
+('20','7','INCUBADORA');
+
+-- Tipo de equipe (15 tipos)
+CREATE TABLE tipo_equipe (
+    tp_equipe VARCHAR(5) PRIMARY KEY,
+    ds_equipe VARCHAR(200) NOT NULL,
+    co_grupo_equipe VARCHAR(5)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO tipo_equipe (tp_equipe, ds_equipe, co_grupo_equipe) VALUES
+('70','ESF - EQUIPE DE SAUDE DA FAMILIA','01'),
+('71','EAP - EQUIPE DE ATENCAO PRIMARIA','14'),
+('72','EQUIPE MULTIPROFISSIONAL','15'),
+('73','EAPP - EQUIPE DE ATENCAO PRIMARIA PRISIONAL','14'),
+('74','EQUIPE DE SAUDE BUCAL','01'),
+('76','ESF RIBEIRINHA','01'),
+('24','EQUIPE DE AGENTES COMUNITARIOS','02'),
+('30','EQUIPE DE CONSULTORIO NA RUA','12'),
+('31','EQUIPE DE ATENCAO DOMICILIAR TIPO 1','17'),
+('32','EQUIPE DE ATENCAO DOMICILIAR TIPO 2','17'),
+('34','NASF 1','04'),
+('35','NASF 2','04'),
+('36','NASF 3','04'),
+('46','EMAD II','17'),
+('58','eMAESM1','15');
+
+-- Grupo de equipe (15 grupos)
+CREATE TABLE grupo_equipe (
+    co_grupo_equipe VARCHAR(5) PRIMARY KEY,
+    no_grupo_equipe VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO grupo_equipe (co_grupo_equipe, no_grupo_equipe) VALUES
+('01','ESF'),
+('02','EACS'),
+('04','NASF'),
+('05','PROVAB'),
+('06','MAIS MEDICOS'),
+('07','SAUDE NO SISTEMA PENITENCIARIO'),
+('09','UOM'),
+('10','EMSI'),
+('12','CONSULTORIO NA RUA'),
+('14','EABP'),
+('15','MULTIPROFISSIONAL'),
+('17','SAD'),
+('18','EQUIPE PRISIONAL'),
+('19','EAPP'),
+('20','EQUIPE DE SAUDE BUCAL');
+
+-- Servico especializado (20 servicos)
+CREATE TABLE servico_especializado (
+    co_servico_especializado VARCHAR(5) PRIMARY KEY,
+    ds_servico_especializado VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO servico_especializado (co_servico_especializado, ds_servico_especializado) VALUES
+('100','SERVICO DE APOIO A ATENCAO A SAUDE'),
+('101','ESTRATEGIA DE SAUDE DA FAMILIA'),
+('103','SERVICO DE ATENDIMENTO MOVEL DE URGENCIAS'),
+('104','SERVICO DE PRATICAS INTEGRATIVAS E COMPLEMENTARES'),
+('105','SERVICO DE VIGILANCIA EM SAUDE'),
+('106','SERVICO DE DIAGNOSTICO POR LABORATORIO CLINICO'),
+('107','SERVICO DE DIAGNOSTICO POR ANATOMIA PATOLOGICA'),
+('108','SERVICO DE DIAGNOSTICO POR IMAGEM'),
+('109','SERVICO DE DIAGNOSTICO POR METODOS GRAFICOS'),
+('110','SERVICO DE FARMACIA'),
+('111','SERVICO DE HEMOTERAPIA'),
+('112','SERVICO DE ATENCAO AO PRE-NATAL PARTO E NASCIMENTO'),
+('113','SERVICO DE ATENCAO A SAUDE REPRODUTIVA'),
+('114','SERVICO DE DIAGNOSTICO POR IMAGEM'),
+('115','SERVICO DE ATENCAO EM REABILITACAO'),
+('116','SERVICO DE ATENCAO A SAUDE AUDITIVA'),
+('117','SERVICO DE URGENCIA E EMERGENCIA'),
+('118','SERVICO DE INTERNACAO'),
+('119','SERVICO DE ATENCAO A SAUDE BUCAL'),
+('134','SERVICO DE ATENCAO A SAUDE MENTAL');
+
+-- Classificacao de servico (20 registros, PK composta)
+CREATE TABLE classificacao_servico (
+    co_classificacao_servico VARCHAR(5) NOT NULL,
+    co_servico_especializado VARCHAR(5) NOT NULL,
+    ds_classificacao_servico VARCHAR(200) NOT NULL,
+    PRIMARY KEY (co_classificacao_servico, co_servico_especializado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO classificacao_servico (co_classificacao_servico, co_servico_especializado, ds_classificacao_servico) VALUES
+('001','101','ESF - EQUIPE DE SAUDE DA FAMILIA'),
+('002','101','EAP - EQUIPE DE ATENCAO PRIMARIA'),
+('001','106','PATOLOGIA CLINICA/ANALISES CLINICAS'),
+('001','108','DIAGNOSTICO POR RADIOLOGIA'),
+('002','108','DIAGNOSTICO POR ULTRASSONOGRAFIA'),
+('003','108','DIAGNOSTICO POR TOMOGRAFIA'),
+('004','108','DIAGNOSTICO POR RESSONANCIA MAGNETICA'),
+('001','109','ELETROCARDIOGRAMA'),
+('002','109','ELETROENCEFALOGRAMA'),
+('001','110','FARMACIA DE UNIDADE HOSPITALAR'),
+('002','110','FARMACIA DE UNIDADE AMBULATORIAL'),
+('001','117','URGENCIA PRE HOSPITALAR FIXA'),
+('002','117','URGENCIA PRE HOSPITALAR MOVEL'),
+('001','118','CLINICA CIRURGICA'),
+('002','118','CLINICA MEDICA'),
+('003','118','OBSTETRICA'),
+('004','118','PEDIATRICA'),
+('001','119','SAUDE BUCAL ATENCAO BASICA'),
+('001','134','CAPS I'),
+('002','134','CAPS II');
+
+-- Atividade profissional / CBO (30 ocupacoes de saude)
+CREATE TABLE atividade_profissional (
+    co_cbo VARCHAR(10) PRIMARY KEY,
+    ds_atividade_profissional VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO atividade_profissional (co_cbo, ds_atividade_profissional) VALUES
+('225125','MEDICO CLINICO'),
+('225142','MEDICO GINECOLOGISTA E OBSTETRA'),
+('225170','MEDICO PEDIATRA'),
+('225130','MEDICO DE FAMILIA E COMUNIDADE'),
+('225185','MEDICO CIRURGIAO GERAL'),
+('225195','MEDICO ORTOPEDISTA E TRAUMATOLOGISTA'),
+('225155','MEDICO CARDIOLOGISTA'),
+('223505','ENFERMEIRO'),
+('223565','ENFERMEIRO DE SAUDE DA FAMILIA'),
+('223810','CIRURGIAO DENTISTA - CLINICO GERAL'),
+('226305','FARMACEUTICO'),
+('223905','FISIOTERAPEUTA GERAL'),
+('251510','PSICOLOGO CLINICO'),
+('322205','TECNICO DE ENFERMAGEM'),
+('322230','AUXILIAR DE ENFERMAGEM'),
+('322245','AGENTE COMUNITARIO DE SAUDE'),
+('324115','TECNICO EM RADIOLOGIA'),
+('225250','MEDICO ANESTESIOLOGISTA'),
+('223710','NUTRICIONISTA'),
+('226310','FARMACEUTICO BIOQUIMICO'),
+('223915','FISIOTERAPEUTA RESPIRATORIA'),
+('251605','ASSISTENTE SOCIAL'),
+('234410','BIOMEDICO'),
+('325115','TECNICO EM PATOLOGIA CLINICA'),
+('515105','AGENTE DE COMBATE AS ENDEMIAS'),
+('239415','FONOAUDIOLOGO'),
+('221105','BIOLOGO'),
+('225265','MEDICO NEUROLOGISTA'),
+('225290','MEDICO PSIQUIATRA'),
+('225120','MEDICO GENERALISTA');
+
+-- Conselho de classe (12 conselhos)
+CREATE TABLE conselho_classe (
+    co_conselho_classe VARCHAR(5) PRIMARY KEY,
+    ds_conselho_classe VARCHAR(200) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO conselho_classe (co_conselho_classe, ds_conselho_classe) VALUES
+('01','CR ADMINISTRACAO'),
+('02','CR BIOLOGIA E BIOMEDICINA'),
+('03','CR CONTABILIDADE'),
+('04','CR ECONOMIA'),
+('05','CR ENFERMAGEM'),
+('06','CR ENGENHARIA'),
+('07','CR FARMACIA'),
+('08','CR FISIOTERAPIA E TERAPIA OCUPACIONAL'),
+('09','CR MEDICINA'),
+('10','CR MEDICINA VETERINARIA'),
+('11','CR ODONTOLOGIA'),
+('12','CR PSICOLOGIA');
+
+-- Catalogo de leitos (20 especialidades)
+CREATE TABLE leitos_catalogo (
+    co_leito VARCHAR(5) PRIMARY KEY,
+    ds_leito VARCHAR(200) NOT NULL,
+    tp_leito VARCHAR(2)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO leitos_catalogo (co_leito, ds_leito, tp_leito) VALUES
+('01','BUCO MAXILO FACIAL','1'),
+('02','CARDIOLOGIA','1'),
+('03','CIRURGIA GERAL','1'),
+('04','ENDOCRINOLOGIA','1'),
+('05','GASTROENTEROLOGIA','1'),
+('06','GERIATRIA','1'),
+('07','GINECOLOGIA','1'),
+('08','HANSENOLOGIA/DERMATOLOGIA','1'),
+('09','NEFROLOGIA/UROLOGIA','1'),
+('10','NEUROLOGIA','1'),
+('11','OBSTETRICA CIRURGICA','1'),
+('12','OBSTETRICA CLINICA','1'),
+('13','OFTALMOLOGIA','1'),
+('14','ONCOLOGIA','1'),
+('15','ORTOPEDIA/TRAUMATOLOGIA','1'),
+('16','OTORRINOLARINGOLOGIA','1'),
+('17','PEDIATRIA CIRURGICA','1'),
+('18','PEDIATRIA CLINICA','1'),
+('19','PNEUMOLOGIA/TISIOLOGIA','1'),
+('20','PSIQUIATRIA','1');
+
+-- ============================================================
+-- SEED DATA - Dados transacionais iniciais
+-- ============================================================
+
+-- 10 Estabelecimentos (mix de UBS, hospital, UPA de diferentes cidades)
+INSERT INTO estabelecimentos (co_unidade, co_cnes, nu_cnpj_mantenedora, no_razao_social, no_fantasia, no_logradouro, nu_endereco, no_bairro, co_cep, nu_telefone, no_email, co_atividade, co_turno_atendimento, co_estado_gestor, co_municipio_gestor, dt_atualizacao, nu_latitude, nu_longitude, co_natureza_jur, st_conexao_internet, co_tipo_unidade, tp_gestao, co_tipo_estabelecimento, co_atividade_principal) VALUES
+('3550302000001','2078015','45780109000166','PREFEITURA MUNICIPAL DE SAO PAULO','UBS JARDIM SAO PAULO','RUA VOLUNTARIOS DA PATRIA','2101','SANTANA','02011000','1129511234','ubs.jspaulo@saude.sp.gov.br','01','03','35','355030','2026-02-01',-23.50227800,-46.62580200,'1031','1','02','01','002','01'),
+('3550302000002','2078880','45780109000166','PREFEITURA MUNICIPAL DE SAO PAULO','HOSPITAL MUNICIPAL DR CARMINO CARICCHIO','AV CELSO GARCIA','4815','TATUAPE','03063000','1120921500','hm.carmino@saude.sp.gov.br','01','04','35','355030','2026-02-01',-23.54190000,-46.57630000,'1031','1','05','06','005','01'),
+('3304552000001','2295394','42498600000147','PREFEITURA MUNICIPAL DO RIO DE JANEIRO','UPA MARECHAL HERMES','RUA CAPITAO MACEDO','218','MARECHAL HERMES','21610310','2133456789','upa.hermes@saude.rj.gov.br','01','04','33','330455','2026-02-01',-22.87230000,-43.27140000,'1031','1','20','05','009','01'),
+('3106202000001','2165023','18715383000180','PREFEITURA MUNICIPAL DE BELO HORIZONTE','UBS SANTA EFIGENIA','RUA AQUILES LOBO','504','SANTA EFIGENIA','30150070','3132741100','ubs.stafig@pbh.gov.br','01','03','31','310620','2026-02-01',-19.92170000,-43.93510000,'1031','1','02','01','002','01'),
+('3106202000002','2165058','18715383000180','PREFEITURA MUNICIPAL DE BELO HORIZONTE','HOSPITAL JULIA KUBITSCHEK','RUA DR CRISTIANO REZENDE','2745','BARREIRO','30622020','3133887000','hjk@fhemig.mg.gov.br','01','04','31','310620','2026-02-01',-19.97860000,-44.02130000,'1023','1','05','06','005','01'),
+('4106902000001','2432102','76417005000186','PREFEITURA MUNICIPAL DE CURITIBA','UBS BOA VISTA','RUA FORTUNATO MAESTRELLI','34','BOA VISTA','82560260','4133501300','ubs.boavista@saude.curitiba.pr.gov.br','01','03','41','410690','2026-02-01',-25.38950000,-49.24370000,'1031','1','02','01','002','01'),
+('2927402000001','2516039','13927801000149','PREFEITURA MUNICIPAL DE SALVADOR','UBS BARRA','AV SETE DE SETEMBRO','3928','BARRA','40140001','7132640800','ubs.barra@saude.salvador.ba.gov.br','01','03','29','292740','2026-02-01',-13.00400000,-38.53100000,'1031','1','02','01','001','01'),
+('3169902000001','2153181','18338178000102','PREFEITURA MUNICIPAL DE JUIZ DE FORA','UBS SANTA LUZIA','RUA PADRE CAFE','367','SANTA LUZIA','36030120','3232161500','ubs.staluzia@pjf.mg.gov.br','01','03','31','316990','2026-02-01',-21.76170000,-43.34880000,'1031','1','02','01','002','01'),
+('5300102000001','2657961','00394601000126','SECRETARIA DE SAUDE DO DISTRITO FEDERAL','HOSPITAL DE BASE DO DISTRITO FEDERAL','SMHS QUADRA 101','SN','ASA SUL','70330150','6133151500','hbdf@saude.df.gov.br','01','04','53','530010','2026-02-01',-15.79260000,-47.88730000,'1236','1','05','06','005','01'),
+('2304402000001','2497123','07954605000160','PREFEITURA MUNICIPAL DE FORTALEZA','UBS MEIRELES','AV ANTONIO SALES','3161','MEIRELES','60165090','8534521100','ubs.meireles@saude.fortaleza.ce.gov.br','01','06','23','230440','2026-02-01',-3.73230000,-38.50870000,'1031','1','02','01','002','01');
+
+-- 20 Profissionais (hex hash IDs, nomes realistas, CPFs mascarados)
+INSERT INTO profissionais (co_profissional_sus, co_cpf, no_profissional, co_cns, dt_atualizacao, co_nacionalidade, no_social) VALUES
+('A1B2C3D4E5F6A7B8','***123456**','MARIA DA SILVA SANTOS','898001234567890','2026-02-01','10',NULL),
+('B2C3D4E5F6A7B8C9','***234567**','JOAO CARLOS OLIVEIRA','898002345678901','2026-02-01','10',NULL),
+('C3D4E5F6A7B8C9D0','***345678**','ANA PAULA FERREIRA','898003456789012','2026-02-01','10',NULL),
+('D4E5F6A7B8C9D0E1','***456789**','PEDRO HENRIQUE COSTA','898004567890123','2026-02-01','10',NULL),
+('E5F6A7B8C9D0E1F2','***567890**','LUCIANA APARECIDA SOUZA','898005678901234','2026-02-01','10',NULL),
+('F6A7B8C9D0E1F2A3','***678901**','MARCOS ANTONIO LIMA','898006789012345','2026-02-01','10',NULL),
+('A7B8C9D0E1F2A3B4','***789012**','CLAUDIA REGINA PEREIRA','898007890123456','2026-02-01','10',NULL),
+('B8C9D0E1F2A3B4C5','***890123**','RAFAEL DE ALMEIDA','898008901234567','2026-02-01','10',NULL),
+('C9D0E1F2A3B4C5D6','***901234**','PATRICIA GOMES RIBEIRO','898009012345678','2026-02-01','10',NULL),
+('D0E1F2A3B4C5D6E7','***012345**','FERNANDO BRITO MARTINS','898000123456789','2026-02-01','10',NULL),
+('E1F2A3B4C5D6E7F8','***112233**','JULIANA MENDES ROCHA','898001122334455','2026-02-01','10',NULL),
+('F2A3B4C5D6E7F8A9','***223344**','CARLOS EDUARDO NUNES','898002233445566','2026-02-01','10',NULL),
+('A3B4C5D6E7F8A9B0','***334455**','RENATA CRISTINA DIAS','898003344556677','2026-02-01','10',NULL),
+('B4C5D6E7F8A9B0C1','***445566**','ANDERSON LUIZ MOREIRA','898004455667788','2026-02-01','10',NULL),
+('C5D6E7F8A9B0C1D2','***556677**','CAMILA SANTOS BARBOSA','898005566778899','2026-02-01','10',NULL),
+('D6E7F8A9B0C1D2E3','***667788**','RODRIGO FERREIRA ARAUJO','898006677889900','2026-02-01','10',NULL),
+('E7F8A9B0C1D2E3F4','***778899**','TATIANA DE PAULA CASTRO','898007788990011','2026-02-01','10',NULL),
+('F8A9B0C1D2E3F4A5','***889900**','GABRIEL MONTEIRO SILVA','898008899001122','2026-02-01','10',NULL),
+('A9B0C1D2E3F4A5B6','***990011**','FERNANDA VIEIRA LOPES','898009900112233','2026-02-01','10',NULL),
+('B0C1D2E3F4A5B6C7','***001122**','THIAGO RAMOS CARDOSO','898000011223344','2026-02-01','10',NULL);
+
+-- 10 Equipes (ESF e outros tipos, municipios variados)
+INSERT INTO equipes (co_municipio, co_area, seq_equipe, co_unidade, tp_equipe, no_referencia, dt_ativacao, dt_desativacao, co_equipe, dt_atualizacao) VALUES
+('355030','001','0001','3550302000001','70','ESF SANTANA I','2020-01-15',NULL,'3550300010001','2026-02-01'),
+('355030','001','0002','3550302000001','70','ESF SANTANA II','2020-03-01',NULL,'3550300010002','2026-02-01'),
+('355030','002','0001','3550302000001','74','SAUDE BUCAL SANTANA','2020-06-01',NULL,'3550300020001','2026-02-01'),
+('310620','001','0001','3106202000001','70','ESF SANTA EFIGENIA I','2019-05-10',NULL,'3106200010001','2026-02-01'),
+('310620','001','0002','3106202000001','71','EAP SANTA EFIGENIA','2021-08-01',NULL,'3106200010002','2026-02-01'),
+('410690','001','0001','4106902000001','70','ESF BOA VISTA I','2018-11-20',NULL,'4106900010001','2026-02-01'),
+('292740','001','0001','2927402000001','70','ESF BARRA I','2019-02-14',NULL,'2927400010001','2026-02-01'),
+('316990','001','0001','3169902000001','70','ESF SANTA LUZIA I','2020-09-01',NULL,'3169900010001','2026-02-01'),
+('230440','001','0001','2304402000001','70','ESF MEIRELES I','2021-01-10',NULL,'2304400010001','2026-02-01'),
+('530010','001','0001','5300102000001','34','NASF HOSPITAL DE BASE','2019-07-01',NULL,'5300100010001','2026-02-01');
+
+-- 15 Equipe-profissionais (vinculos profissional-equipe)
+INSERT INTO equipe_profissionais (co_municipio, co_area, seq_equipe, co_profissional_sus, co_unidade, co_cbo, tp_sus_nao_sus, ind_vinculacao, dt_entrada, dt_desligamento, st_equipeminima, dt_atualizacao) VALUES
+('355030','001','0001','A1B2C3D4E5F6A7B8','3550302000001','225130','S','01','2020-01-15',NULL,'1','2026-02-01'),
+('355030','001','0001','B2C3D4E5F6A7B8C9','3550302000001','223565','S','01','2020-01-15',NULL,'1','2026-02-01'),
+('355030','001','0001','E5F6A7B8C9D0E1F2','3550302000001','322205','S','01','2020-02-01',NULL,'1','2026-02-01'),
+('355030','001','0002','C3D4E5F6A7B8C9D0','3550302000001','225130','S','01','2020-03-01',NULL,'1','2026-02-01'),
+('355030','001','0002','D4E5F6A7B8C9D0E1','3550302000001','223565','S','01','2020-03-01',NULL,'1','2026-02-01'),
+('355030','002','0001','A7B8C9D0E1F2A3B4','3550302000001','223810','S','01','2020-06-01',NULL,'1','2026-02-01'),
+('310620','001','0001','F6A7B8C9D0E1F2A3','3106202000001','225130','S','01','2019-05-10',NULL,'1','2026-02-01'),
+('310620','001','0001','B8C9D0E1F2A3B4C5','3106202000001','223565','S','01','2019-06-01',NULL,'1','2026-02-01'),
+('310620','001','0002','C9D0E1F2A3B4C5D6','3106202000001','223505','S','01','2021-08-01',NULL,'1','2026-02-01'),
+('410690','001','0001','D0E1F2A3B4C5D6E7','4106902000001','225130','S','01','2018-11-20',NULL,'1','2026-02-01'),
+('410690','001','0001','E1F2A3B4C5D6E7F8','4106902000001','223565','S','01','2019-01-10',NULL,'1','2026-02-01'),
+('292740','001','0001','F2A3B4C5D6E7F8A9','2927402000001','225130','S','01','2019-02-14',NULL,'1','2026-02-01'),
+('316990','001','0001','A3B4C5D6E7F8A9B0','3169902000001','225130','S','01','2020-09-01',NULL,'1','2026-02-01'),
+('230440','001','0001','B4C5D6E7F8A9B0C1','2304402000001','225125','S','01','2021-01-10',NULL,'1','2026-02-01'),
+('530010','001','0001','C5D6E7F8A9B0C1D2','5300102000001','223905','S','01','2019-07-01',NULL,'0','2026-02-01');
+
+-- 20 Carga horaria (vinculos profissional-estabelecimento com horas)
+INSERT INTO carga_horaria (co_unidade, co_profissional_sus, co_cbo, tp_sus_nao_sus, ind_vinculacao, qt_carga_horaria_ambulatorial, co_conselho_classe, nu_registro, qt_carga_horaria_outros, qt_carga_hor_hosp_sus, dt_atualizacao) VALUES
+('3550302000001','A1B2C3D4E5F6A7B8','225130','S','01',40,'09','CRM-SP-123456',0,0,'2026-02-01'),
+('3550302000001','B2C3D4E5F6A7B8C9','223565','S','01',40,'05','COREN-SP-234567',0,0,'2026-02-01'),
+('3550302000001','C3D4E5F6A7B8C9D0','225130','S','01',40,'09','CRM-SP-345678',0,0,'2026-02-01'),
+('3550302000001','D4E5F6A7B8C9D0E1','223565','S','01',40,'05','COREN-SP-456789',0,0,'2026-02-01'),
+('3550302000001','E5F6A7B8C9D0E1F2','322205','S','01',40,'05','COREN-SP-567890',0,0,'2026-02-01'),
+('3550302000001','A7B8C9D0E1F2A3B4','223810','S','01',20,'11','CRO-SP-678901',0,0,'2026-02-01'),
+('3550302000002','F8A9B0C1D2E3F4A5','225125','S','01',20,'09','CRM-SP-889900',0,24,'2026-02-01'),
+('3550302000002','E7F8A9B0C1D2E3F4','223505','S','01',20,'05','COREN-SP-778899',0,24,'2026-02-01'),
+('3106202000001','F6A7B8C9D0E1F2A3','225130','S','01',40,'09','CRM-MG-678901',0,0,'2026-02-01'),
+('3106202000001','B8C9D0E1F2A3B4C5','223565','S','01',40,'05','COREN-MG-890123',0,0,'2026-02-01'),
+('3106202000001','C9D0E1F2A3B4C5D6','223505','S','01',40,'05','COREN-MG-901234',0,0,'2026-02-01'),
+('3106202000002','D6E7F8A9B0C1D2E3','225185','S','01',20,'09','CRM-MG-667788',0,20,'2026-02-01'),
+('4106902000001','D0E1F2A3B4C5D6E7','225130','S','01',40,'09','CRM-PR-012345',0,0,'2026-02-01'),
+('4106902000001','E1F2A3B4C5D6E7F8','223565','S','01',40,'05','COREN-PR-112233',0,0,'2026-02-01'),
+('2927402000001','F2A3B4C5D6E7F8A9','225130','S','01',40,'09','CRM-BA-223344',0,0,'2026-02-01'),
+('3169902000001','A3B4C5D6E7F8A9B0','225130','S','01',40,'09','CRM-MG-334455',0,0,'2026-02-01'),
+('2304402000001','B4C5D6E7F8A9B0C1','225125','S','01',32,'09','CRM-CE-445566',8,0,'2026-02-01'),
+('5300102000001','C5D6E7F8A9B0C1D2','223905','S','01',20,'08','CREFITO-DF-556677',0,20,'2026-02-01'),
+('5300102000001','A9B0C1D2E3F4A5B6','223710','S','01',30,'07','CRN-DF-990011',10,0,'2026-02-01'),
+('5300102000001','B0C1D2E3F4A5B6C7','251510','S','01',20,'12','CRP-DF-001122',20,0,'2026-02-01');
+
+-- 15 Equipamentos por estabelecimento
+INSERT INTO estab_equipamentos (co_unidade, co_equipamento, co_tipo_equipamento, qt_existente, qt_uso, tp_sus, qt_sus, dt_atualizacao) VALUES
+('3550302000001','12','4',2,2,'S',2,'2026-02-01'),
+('3550302000001','17','6',3,3,'S',3,'2026-02-01'),
+('3550302000002','01','1',3,2,'S',2,'2026-02-01'),
+('3550302000002','05','1',1,1,'S',1,'2026-02-01'),
+('3550302000002','07','1',2,2,'S',2,'2026-02-01'),
+('3550302000002','14','5',4,4,'S',4,'2026-02-01'),
+('3550302000002','15','5',8,8,'S',8,'2026-02-01'),
+('3550302000002','16','5',6,5,'S',5,'2026-02-01'),
+('3106202000001','12','4',1,1,'S',1,'2026-02-01'),
+('3106202000002','02','1',2,2,'S',2,'2026-02-01'),
+('3106202000002','06','1',1,1,'S',1,'2026-02-01'),
+('5300102000001','05','1',2,2,'S',2,'2026-02-01'),
+('5300102000001','06','1',1,1,'S',1,'2026-02-01'),
+('5300102000001','07','1',3,3,'S',3,'2026-02-01'),
+('5300102000001','16','5',10,8,'S',8,'2026-02-01');
+
+-- 15 Servicos por estabelecimento
+INSERT INTO estab_servicos (co_unidade, co_servico, co_classificacao, co_ambulatorial, co_ambulatorial_sus, co_hospitalar, co_hospitalar_sus, dt_atualizacao) VALUES
+('3550302000001','101','001','1','1','2','2','2026-02-01'),
+('3550302000001','119','001','1','1','2','2','2026-02-01'),
+('3550302000002','108','001','1','1','1','1','2026-02-01'),
+('3550302000002','108','003','1','1','1','1','2026-02-01'),
+('3550302000002','117','001','1','1','1','1','2026-02-01'),
+('3550302000002','118','001','2','2','1','1','2026-02-01'),
+('3550302000002','118','002','2','2','1','1','2026-02-01'),
+('3106202000001','101','001','1','1','2','2','2026-02-01'),
+('3106202000002','108','001','1','1','1','1','2026-02-01'),
+('3106202000002','118','001','2','2','1','1','2026-02-01'),
+('4106902000001','101','001','1','1','2','2','2026-02-01'),
+('2927402000001','101','001','1','1','2','2','2026-02-01'),
+('3169902000001','101','001','1','1','2','2','2026-02-01'),
+('5300102000001','117','001','1','1','1','1','2026-02-01'),
+('5300102000001','118','002','2','2','1','1','2026-02-01');
+
+-- ============================================================
+-- PERMISSOES PARA DEBEZIUM CDC
+-- ============================================================
+
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'appuser'@'%';
+FLUSH PRIVILEGES;
